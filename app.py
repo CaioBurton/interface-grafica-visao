@@ -37,6 +37,10 @@ class App(ctk.CTk):
         self.current = None    # imagem atual (PIL)
         self._ctk_image = None
         self.entries = {}
+        self.auto_var = ctk.BooleanVar(value=True)
+        self.operacao_de = {}   # parâmetro -> operação reaplicada ao mover o slider
+        self._base = None       # imagem de partida enquanto se arrastam sliders
+        self._resultado = None  # última imagem produzida por um slider
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
@@ -70,14 +74,52 @@ class App(ctk.CTk):
     def _botao(self, parent, texto, cmd, **kw):
         ctk.CTkButton(parent, text=texto, command=cmd, **kw).pack(fill="x", padx=10, pady=3)
 
-    def _campo(self, parent, chave, rotulo, padrao):
-        linha = ctk.CTkFrame(parent, fg_color="transparent")
-        linha.pack(fill="x", padx=10, pady=2)
+    def _campo(self, parent, chave, rotulo, padrao, faixa=None, passos=None):
+        """Campo de texto; com `faixa=(min, max)` ganha também um slider sincronizado.
+        `passos` = número de divisões do slider (None = contínuo)."""
+        bloco = ctk.CTkFrame(parent, fg_color="transparent")
+        bloco.pack(fill="x", padx=10, pady=2)
+        linha = ctk.CTkFrame(bloco, fg_color="transparent")
+        linha.pack(fill="x")
         ctk.CTkLabel(linha, text=rotulo, width=90, anchor="w").pack(side="left")
         e = ctk.CTkEntry(linha)
         e.insert(0, padrao)
         e.pack(side="left", fill="x", expand=True)
         self.entries[chave] = e
+        if faixa is None:
+            return
+        lo, hi = faixa
+        slider = ctk.CTkSlider(bloco, from_=lo, to=hi, number_of_steps=passos, height=14)
+        slider.pack(fill="x", pady=(2, 0))
+        try:
+            slider.set(min(max(float(padrao), lo), hi))
+        except ValueError:
+            pass
+
+        def do_slider(v):
+            e.delete(0, "end")
+            e.insert(0, f"{round(v, 3):g}")
+            if self.auto_var.get():
+                self._reaplicar(chave)
+
+        def do_texto(_ev=None):
+            try:
+                slider.set(min(max(float(e.get().replace(",", ".")), lo), hi))
+            except ValueError:
+                pass
+        slider.configure(command=do_slider)
+        e.bind("<KeyRelease>", do_texto)
+
+    def _reaplicar(self, chave):
+        """Com 'Aplicar ao mover' ligado, refaz a operação da seção do parâmetro a partir da imagem anterior."""
+        op = self.operacao_de.get(chave)
+        if op is None or self.current is None:
+            return
+        if self.current is not self._resultado:   # a imagem mudou por outra operação: novo ponto de partida
+            self._base = self.current
+        self.current = self._base
+        op()
+        self._resultado = self.current
 
     def _build_sidebar(self, parent):
         side = ctk.CTkScrollableFrame(parent, width=250, corner_radius=0)
@@ -92,34 +134,37 @@ class App(ctk.CTk):
         self._botao(side, "Restaurar original", self.restore_image, fg_color="gray30", hover_color="gray40")
         self._botao(side, "Escala de cinza", self.op_cinza)
 
+        ctk.CTkSwitch(side, text="Aplicar ao mover o slider", variable=self.auto_var).pack(
+            fill="x", padx=10, pady=(14, 2))
+
         self._secao(side, "FILTROS")
         self.filtro_menu = ctk.CTkOptionMenu(side, values=FILTROS)
         self.filtro_menu.pack(fill="x", padx=10, pady=3)
-        self._campo(side, "k", "Janela k", "3")
-        self._campo(side, "alpha", "α (cortada)", "2")
+        self._campo(side, "k", "Janela k", "3", (3, 31), 14)
+        self._campo(side, "alpha", "α (cortada)", "2", (0, 24), 12)
         self._botao(side, "Aplicar filtro", self.op_filtro)
 
         self._secao(side, "TRANSFORMAÇÃO GEOMÉTRICA")
-        self._campo(side, "s", "Escala", "1.0")
-        self._campo(side, "theta", "Ângulo (°)", "0")
-        self._campo(side, "tx", "Transl. x", "0")
-        self._campo(side, "ty", "Transl. y", "0")
+        self._campo(side, "s", "Escala", "1.0", (0.1, 4))
+        self._campo(side, "theta", "Ângulo (°)", "0", (-180, 180))
+        self._campo(side, "tx", "Transl. x", "0", (-300, 300))
+        self._campo(side, "ty", "Transl. y", "0", (-300, 300))
         self.interp_menu = ctk.CTkOptionMenu(side, values=["bilinear", "vizinho"])
         self.interp_menu.pack(fill="x", padx=10, pady=3)
         self._botao(side, "Aplicar transformação", self.op_transformar)
 
         self._secao(side, "REAMOSTRAGEM")
-        self._campo(side, "r", "Fator r", "2")
+        self._campo(side, "r", "Fator r", "2", (2, 8), 6)
         self._botao(side, "Aumentar resolução", lambda: self.op_reamostrar(True))
         self._botao(side, "Diminuir resolução", lambda: self.op_reamostrar(False))
 
         self._secao(side, "DISTORÇÃO RADIAL")
-        self._campo(side, "k1", "k1", "0.1")
-        self._campo(side, "k2", "k2", "0.0")
+        self._campo(side, "k1", "k1", "0.1", (-1, 1))
+        self._campo(side, "k2", "k2", "0.0", (-1, 1))
         self._botao(side, "Corrigir distorção", self.op_distorcao)
 
         self._secao(side, "COMPOSIÇÃO (OVER)")
-        self._campo(side, "over_a", "α", "0.5")
+        self._campo(side, "over_a", "α", "0.5", (0, 1))
         self._botao(side, "Compor com imagem de frente...", self.op_over)
 
         self._secao(side, "IMAGEM INTEGRAL")
@@ -127,10 +172,15 @@ class App(ctk.CTk):
         self._botao(side, "Soma no retângulo", self.op_soma_retangulo)
 
         self._secao(side, "SEGMENTAÇÃO / MRF")
-        self._campo(side, "kc", "Clusters k", "3")
+        self._campo(side, "kc", "Clusters k", "3", (2, 10), 8)
         self._botao(side, "Segmentar (k-means)", self.op_kmeans)
-        self._campo(side, "icm_s", "Suavidade s", "0.3")
+        self._campo(side, "icm_s", "Suavidade s", "0.3", (0, 2))
         self._botao(side, "Binarizar + limpar (ICM)", self.op_icm)
+
+        for chaves, op in ((("k", "alpha"), self.op_filtro), (("s", "theta", "tx", "ty"), self.op_transformar),
+                           (("k1", "k2"), self.op_distorcao), (("kc",), self.op_kmeans), (("icm_s",), self.op_icm)):
+            for c in chaves:
+                self.operacao_de[c] = op
 
         self._secao(side, "TEMA")
         ctk.CTkOptionMenu(side, values=["Dark", "Light", "System"],
