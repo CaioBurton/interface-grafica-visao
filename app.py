@@ -6,6 +6,7 @@ import customtkinter as ctk
 import numpy as np
 from PIL import Image
 
+from gui_formacao import FormacaoImagemTab
 from registro import FUNCOES
 from vc import aprendizado, filtros, otimizacao, transformacoes
 
@@ -53,6 +54,8 @@ class App(ctk.CTk):
         self.status.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
 
         self._build_funcoes(tab_fun)
+
+        FormacaoImagemTab(self.tabs.add("Formação de Imagem")).pack(fill="both", expand=True)
 
         self.bind("<Control-o>", lambda _e: self.load_image())
         self.bind("<Control-s>", lambda _e: self.save_image())
