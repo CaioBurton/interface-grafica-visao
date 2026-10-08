@@ -79,7 +79,7 @@ class App(ctk.CTk):
 
     def _build_sidebar(self, parent):
         side = ctk.CTkScrollableFrame(parent, width=250, corner_radius=0)
-        side.grid(row=0, column=0, rowspan=2, sticky="ns")
+        side.grid(row=0, column=0, sticky="ns")
 
         self._secao(side, "ARQUIVO")
         self._botao(side, "Abrir imagem", self.load_image)

@@ -1,10 +1,17 @@
 """Aba "Formação de Imagem": projeção perspectiva x ortográfica escalada de um cubo."""
+import math
+
 import customtkinter as ctk
 import numpy as np
 
 from vc import formacao_imagem as fi
 
 PERSPECTIVA, ORTOGRAFICA = "Perspectiva", "Ortográfica escalada"
+
+# Faixa do slider de cada parâmetro (o campo de texto aceita qualquer valor).
+LIMITES = {"fx": (100, 3000), "fy": (100, 3000), "cx": (0, 1280), "cy": (0, 720), "skew": (-500, 500),
+           "escala": (10, 500), "tx": (-10, 10), "ty": (-10, 10), "tz": (0, 20),
+           "rx": (-180, 180), "ry": (-180, 180), "rz": (-180, 180)}
 
 
 class FormacaoImagemTab(ctk.CTkFrame):
@@ -22,6 +29,13 @@ class FormacaoImagemTab(ctk.CTkFrame):
         self.image_label = ctk.CTkLabel(self, text="")
         self.image_label.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
         self.image_label.bind("<Configure>", lambda _e: self._exibir())
+        self._arrasto = None   # (x, y) do último ponto do arrasto com o mouse
+        self._esc = 1.0        # fator de exibição (pixels da tela / pixels do sensor)
+        for ev, fn in (("<ButtonPress-1>", self._mouse_inicio), ("<ButtonPress-3>", self._mouse_inicio),
+                       ("<B1-Motion>", self._mouse_gira), ("<B3-Motion>", self._mouse_translada),
+                       ("<ButtonRelease-1>", self._mouse_fim), ("<ButtonRelease-3>", self._mouse_fim),
+                       ("<MouseWheel>", self._mouse_roda)):
+            self.image_label.bind(ev, fn)
         self.status = ctk.CTkLabel(self, text="", anchor="w")
         self.status.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
 
@@ -33,17 +47,31 @@ class FormacaoImagemTab(ctk.CTkFrame):
             fill="x", padx=10, pady=(14, 2))
 
     def _campo(self, parent, chave, rotulo, valor):
-        linha = ctk.CTkFrame(parent, fg_color="transparent")
-        linha.pack(fill="x", padx=10, pady=2)
+        minimo, maximo = LIMITES[chave]
+        bloco = ctk.CTkFrame(parent, fg_color="transparent")
+        bloco.pack(fill="x", padx=10, pady=2)
+        linha = ctk.CTkFrame(bloco, fg_color="transparent")
+        linha.pack(fill="x")
         ctk.CTkLabel(linha, text=rotulo, width=90, anchor="w").pack(side="left")
         var = ctk.StringVar(value=f"{valor:g}")
-        var.trace_add("write", lambda *_: self._ao_alterar(chave))
         ctk.CTkEntry(linha, textvariable=var).pack(side="left", fill="x", expand=True)
+        slider = ctk.CTkSlider(bloco, from_=minimo, to=maximo, height=14,
+                               command=lambda v: var.set(f"{round(v, 2):g}"))
+        slider.set(valor)
+        slider.pack(fill="x", pady=(2, 0))
+
+        def ao_digitar(*_):
+            try:
+                slider.set(min(max(self._numero(var.get()), minimo), maximo))
+            except ValueError:
+                pass
+            self._ao_alterar(chave)
+        var.trace_add("write", ao_digitar)
         self.vars[chave] = var
 
     def _build_painel(self):
         self.painel = ctk.CTkScrollableFrame(self, width=270, corner_radius=0)
-        self.painel.grid(row=0, column=0, rowspan=2, sticky="ns")
+        self.painel.grid(row=0, column=0, sticky="ns")
 
         self._secao("MODELO DE PROJEÇÃO")
         self.modelo = ctk.CTkOptionMenu(self.painel, values=[PERSPECTIVA, ORTOGRAFICA],
@@ -121,8 +149,73 @@ class FormacaoImagemTab(ctk.CTkFrame):
         self.igualar.select()
         self._trocar_modelo()
 
+    # ---------- interação com o mouse na imagem ----------
+    # esquerdo: arrastar gira (X/Y), Shift+arrastar gira em Z | direito: arrasta transladando X/Y
+    # roda: aproxima/afasta (tz)
+    def _mouse_inicio(self, e):
+        self._arrasto = (e.x, e.y)
+
+    def _mouse_fim(self, _e):
+        self._arrasto = None
+
+    def _delta(self, e):
+        if self._arrasto is None:
+            return None
+        dx, dy = (e.x - self._arrasto[0]) / self._esc, (e.y - self._arrasto[1]) / self._esc
+        self._arrasto = (e.x, e.y)
+        return dx, dy
+
+    def _somar(self, **incrementos):
+        """Soma incrementos aos parâmetros e atualiza a imagem uma única vez."""
+        self._atualizando = True
+        try:
+            for chave, inc in incrementos.items():
+                v = self._valor(chave) + inc
+                if chave in ("rx", "ry", "rz"):
+                    v = (v + 180) % 360 - 180
+                self.vars[chave].set(f"{round(v, 3):g}")
+        except ValueError:
+            pass
+        finally:
+            self._atualizando = False
+        self._atualizar()
+
+    def _mouse_gira(self, e):
+        d = self._delta(e)
+        if d is None:
+            return
+        k = 0.4  # graus por pixel
+        if e.state & 0x1:  # Shift
+            self._somar(rz=d[0] * k)
+        else:
+            self._somar(ry=-d[0] * k, rx=d[1] * k)
+
+    def _mouse_translada(self, e):
+        d = self._delta(e)
+        if d is None:
+            return
+        try:
+            if self.modelo.get() == PERSPECTIVA:
+                m = self._valor("tz") / self._valor("fx")   # unidades do mundo por pixel na profundidade tz
+            else:
+                m = 1 / self._valor("escala")
+        except (ValueError, ZeroDivisionError):
+            return
+        self._somar(tx=d[0] * m, ty=d[1] * m)
+
+    def _mouse_roda(self, e):
+        self._somar(tz=-0.5 if e.delta > 0 else 0.5)
+
+    @staticmethod
+    def _numero(texto):
+        """Converte o texto em float finito; levanta ValueError para vazio, texto, nan ou inf."""
+        v = float(texto.replace(",", "."))
+        if not math.isfinite(v):
+            raise ValueError("valor não finito")
+        return v
+
     def _valor(self, chave):
-        return float(self.vars[chave].get().replace(",", "."))
+        return self._numero(self.vars[chave].get())
 
     # ---------- geração da imagem ----------
     def _atualizar(self):
@@ -153,7 +246,7 @@ class FormacaoImagemTab(ctk.CTkFrame):
             return
         cw, ch = max(self.image_label.winfo_width(), 1), max(self.image_label.winfo_height(), 1)
         w, h = self._ultima.size
-        esc = min(cw / w, ch / h, 1.0)
+        esc = self._esc = min(cw / w, ch / h, 1.0)
         tam = (max(int(w * esc), 1), max(int(h * esc), 1))
         self._ctk_image = ctk.CTkImage(light_image=self._ultima, dark_image=self._ultima, size=tam)
         self.image_label.configure(image=self._ctk_image)
