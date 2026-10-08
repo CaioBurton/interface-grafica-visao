@@ -34,3 +34,8 @@ com (cx, cy) no centro do sensor. Na perspectiva, cx e cy não mudam ao trocar a
 
 `python blending.py [pasta_imagens] [pasta_saida] [niveis]` gera em `resultados_blending/` o blending,
 a justaposição direta, a comparação, o zoom da emenda e as pirâmides.
+
+Na interface, a aba **Blending (Pirâmides)** carrega por padrão a maçã, a laranja e a máscara sugeridas;
+é possível escolher outras imagens A/B (a B é redimensionada para o tamanho da A), uma máscara em arquivo
+ou uma máscara automática (metade esquerda/direita), e o número de níveis. As visões são: comparação,
+blending, justaposição, zoom da emenda e pirâmides (salvar com "Salvar visualização").

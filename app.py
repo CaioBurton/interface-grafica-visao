@@ -6,6 +6,7 @@ import customtkinter as ctk
 import numpy as np
 from PIL import Image
 
+from gui_blending import BlendingTab
 from gui_formacao import FormacaoImagemTab
 from registro import FUNCOES
 from vc import aprendizado, filtros, otimizacao, transformacoes
@@ -56,6 +57,7 @@ class App(ctk.CTk):
         self._build_funcoes(tab_fun)
 
         FormacaoImagemTab(self.tabs.add("Formação de Imagem")).pack(fill="both", expand=True)
+        BlendingTab(self.tabs.add("Blending (Pirâmides)")).pack(fill="both", expand=True)
 
         self.bind("<Control-o>", lambda _e: self.load_image())
         self.bind("<Control-s>", lambda _e: self.save_image())
