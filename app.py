@@ -14,6 +14,7 @@ from vc import aprendizado, filtros, otimizacao, transformacoes
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
+PESADOS = ("Mediana", "Média α-cortada", "Mediana ponderada")
 FILTROS = ["Média (box)", "Média (imagem integral)", "Gaussiano", "Corner (separável)",
            "Mediana", "Média α-cortada", "Mediana ponderada"]
 
@@ -41,6 +42,7 @@ class App(ctk.CTk):
         self.operacao_de = {}   # parâmetro -> operação reaplicada ao mover o slider
         self._base = None       # imagem de partida enquanto se arrastam sliders
         self._resultado = None  # última imagem produzida por um slider
+        self._pendente = None   # id do after() do próximo reprocessamento agendado
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
@@ -99,8 +101,7 @@ class App(ctk.CTk):
         def do_slider(v):
             e.delete(0, "end")
             e.insert(0, f"{round(v, 3):g}")
-            if self.auto_var.get():
-                self._reaplicar(chave)
+            self._agendar(chave)
 
         def do_texto(_ev=None):
             try:
@@ -108,10 +109,30 @@ class App(ctk.CTk):
             except ValueError:
                 pass
         slider.configure(command=do_slider)
+        slider.bind("<ButtonRelease-1>", lambda _e: self._agendar(chave, final=True), add="+")
         e.bind("<KeyRelease>", do_texto)
 
+    def _pesado(self, chave):
+        """Operações cujo custo cresce muito com o parâmetro: só são refeitas ao soltar o slider."""
+        if chave in ("kc", "icm_s"):
+            return True
+        return chave in ("k", "alpha") and self.filtro_menu.get() in PESADOS
+
+    def _agendar(self, chave, final=False):
+        """Com 'Aplicar ao mover' ligado, refaz a operação. Durante o arrasto as chamadas são agrupadas
+        (no máximo uma a cada ~80 ms) e as operações pesadas esperam o slider ser solto."""
+        if not self.auto_var.get() or self.operacao_de.get(chave) is None:
+            return
+        if self._pendente is not None:
+            self.after_cancel(self._pendente)
+            self._pendente = None
+        if final:
+            self._reaplicar(chave)
+        elif not self._pesado(chave):
+            self._pendente = self.after(80, lambda: (setattr(self, "_pendente", None), self._reaplicar(chave)))
+
     def _reaplicar(self, chave):
-        """Com 'Aplicar ao mover' ligado, refaz a operação da seção do parâmetro a partir da imagem anterior."""
+        """Refaz a operação do parâmetro a partir da imagem anterior ao ajuste."""
         op = self.operacao_de.get(chave)
         if op is None or self.current is None:
             return
@@ -120,6 +141,7 @@ class App(ctk.CTk):
         self.current = self._base
         op()
         self._resultado = self.current
+        self.update_idletasks()
 
     def _build_sidebar(self, parent):
         side = ctk.CTkScrollableFrame(parent, width=250, corner_radius=0)
@@ -345,11 +367,13 @@ class App(ctk.CTk):
         # modo "reflect" evita escurecimento nas bordas
         def f(a):
             if nome == "Média (box)":
-                return filtros.convolucao(a, filtros.nucleo_media(k), "reflect")
+                h = np.full(k, 1.0 / k)   # média é separável: O(k) por pixel em vez de O(k²)
+                return filtros.filtro_separavel(a, h, h, "reflect")
             if nome == "Média (imagem integral)":
                 return filtros.filtro_media_integral(a, k)
             if nome == "Gaussiano":
-                return filtros.convolucao(a, filtros.nucleo_gaussiano(k), "reflect")
+                h = filtros.nucleo_gaussiano(k).sum(axis=1)   # núcleo 1D (o 2D é h hᵀ)
+                return filtros.filtro_separavel(a, h, h, "reflect")
             if nome == "Corner (separável)":
                 return filtros.filtro_separavel(a, filtros.H_CORNER, filtros.H_CORNER, "reflect")
             if nome == "Mediana":
