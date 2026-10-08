@@ -25,3 +25,12 @@ cada alteração; use os campos, os sliders ou o mouse sobre a imagem:
 Equações (código em `vc/formacao_imagem.py`): `Xc = R·Xw + t`, `R = Rz·Ry·Rx`;
 perspectiva `x̃ = K·Xc`, `u = x̃₁/x̃₃`, `v = x̃₂/x̃₃`; ortográfica `u = s·Xc + cx`, `v = s·Yc + cy`
 com (cx, cy) no centro do sensor. Na perspectiva, cx e cy não mudam ao trocar a resolução.
+
+## Atividade 02 - Blending com pirâmides
+
+`vc/piramides.py`: `reduzir`/`expandir` (núcleo binomial 5x5), `piramide_gaussiana`, `piramide_laplaciana`,
+`colapsar`, `blending` (Burt e Adelson, 1983) e `justaposicao`. Para cada nível,
+`L_blend = Gm·La + (1−Gm)·Lb`, com `Gm` a pirâmide Gaussiana da máscara; a pirâmide é então colapsada.
+
+`python blending.py [pasta_imagens] [pasta_saida] [niveis]` gera em `resultados_blending/` o blending,
+a justaposição direta, a comparação, o zoom da emenda e as pirâmides.
