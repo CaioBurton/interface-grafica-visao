@@ -13,6 +13,7 @@ PADROES = {"a": "512_burt_apple.png", "b": "512_burt_orange.png", "mascara": "51
 ROTULOS = {"a": "Imagem A (onde máscara = 1)", "b": "Imagem B (onde máscara = 0)", "mascara": "Máscara"}
 TIPOS = [("Imagens", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff")]
 VISOES = ["Comparação", "Blending", "Justaposição", "Zoom da emenda", "Pirâmides"]
+MAX_NIVEIS = 9   # 512 -> 4 pixels no último nível
 MASCARA_ARQUIVO = "Arquivo"
 MASCARA_ESQ = "Metade esquerda = A"
 MASCARA_DIR = "Metade direita = A"
@@ -87,12 +88,30 @@ class BlendingTab(ctk.CTkFrame):
         self.niveis = ctk.CTkEntry(linha)
         self.niveis.insert(0, "5")
         self.niveis.pack(side="left", fill="x", expand=True)
+        self.niveis.bind("<KeyRelease>", self._texto_niveis)
+        self.slider_niveis = ctk.CTkSlider(p, from_=1, to=MAX_NIVEIS, number_of_steps=MAX_NIVEIS - 1, height=14,
+                                           command=self._slider_niveis)
+        self.slider_niveis.set(5)
+        self.slider_niveis.pack(fill="x", padx=10, pady=(2, 0))
+        # o blending só é refeito ao soltar o slider (durante o arrasto só o número muda)
+        self.slider_niveis.bind("<ButtonRelease-1>", lambda _e: self.aplicar() if self.resultados else None, add="+")
         ctk.CTkButton(p, text="Aplicar blending", command=self.aplicar).pack(fill="x", padx=10, pady=(10, 3))
 
         secao("VISUALIZAÇÃO")
         self.visao = ctk.CTkOptionMenu(p, values=VISOES, command=lambda _v: self._exibir())
         self.visao.pack(fill="x", padx=10, pady=3)
         ctk.CTkButton(p, text="Salvar visualização", command=self.salvar).pack(fill="x", padx=10, pady=(10, 3))
+
+    # ---------- níveis ----------
+    def _slider_niveis(self, v):
+        self.niveis.delete(0, "end")
+        self.niveis.insert(0, str(int(round(v))))
+
+    def _texto_niveis(self, _ev=None):
+        try:
+            self.slider_niveis.set(min(max(int(self.niveis.get()), 1), MAX_NIVEIS))
+        except ValueError:
+            pass
 
     # ---------- entrada ----------
     def _definir(self, chave, caminho):
