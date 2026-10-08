@@ -1,30 +1,45 @@
-"""Atividade Prática 00 - Interface Gráfica (casca para algoritmos de visão computacional)."""
+"""Interface gráfica de visão computacional (CustomTkinter) sobre a biblioteca `vc`."""
+import ast
 from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
+import numpy as np
 from PIL import Image
 
-import exercicios
+from registro import FUNCOES
+from vc import aprendizado, filtros, otimizacao, transformacoes
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
+
+FILTROS = ["Média (box)", "Média (imagem integral)", "Gaussiano", "Corner (separável)",
+           "Mediana", "Média α-cortada", "Mediana ponderada"]
+
+
+def formatar(res):
+    if isinstance(res, tuple):
+        return "\n\n".join(formatar(r) for r in res)
+    if isinstance(res, np.ndarray) or isinstance(res, (list, float, np.floating)):
+        return np.array2string(np.asarray(res), precision=4, suppress_small=True)
+    return str(res)
 
 
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Visão Computacional")
-        self.geometry("1000x700")
-        self.minsize(700, 500)
+        self.geometry("1200x780")
+        self.minsize(900, 600)
 
         self.original = None   # imagem original (PIL), nunca modificada
-        self.current = None    # imagem atual (PIL), alvo dos algoritmos
+        self.current = None    # imagem atual (PIL)
         self._ctk_image = None
+        self.entries = {}
 
         self.tabs = ctk.CTkTabview(self)
         self.tabs.pack(fill="both", expand=True, padx=8, pady=8)
         tab_img = self.tabs.add("Imagem")
-        tab_ex = self.tabs.add("Exercícios")
+        tab_fun = self.tabs.add("Funções")
 
         tab_img.grid_columnconfigure(1, weight=1)
         tab_img.grid_rowconfigure(0, weight=1)
@@ -32,81 +47,155 @@ class App(ctk.CTk):
 
         self.image_label = ctk.CTkLabel(tab_img, text="Abra uma imagem para começar", font=ctk.CTkFont(size=16))
         self.image_label.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
-        self.image_label.bind("<Configure>", lambda e: self.show())
+        self.image_label.bind("<Configure>", lambda _e: self.show())
 
         self.status = ctk.CTkLabel(tab_img, text="Nenhuma imagem carregada.", anchor="w")
         self.status.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 8))
 
-        self._build_exercises(tab_ex)
+        self._build_funcoes(tab_fun)
 
-        self.bind("<Control-o>", lambda e: self.load_image())
-        self.bind("<Control-s>", lambda e: self.save_image())
-        self.bind("<Control-r>", lambda e: self.restore_image())
+        self.bind("<Control-o>", lambda _e: self.load_image())
+        self.bind("<Control-s>", lambda _e: self.save_image())
+        self.bind("<Control-r>", lambda _e: self.restore_image())
 
     # ---------- construção da interface ----------
+    def _secao(self, parent, titulo):
+        ctk.CTkLabel(parent, text=titulo, anchor="w", text_color="gray").pack(fill="x", padx=10, pady=(14, 2))
+
+    def _botao(self, parent, texto, cmd, **kw):
+        ctk.CTkButton(parent, text=texto, command=cmd, **kw).pack(fill="x", padx=10, pady=3)
+
+    def _campo(self, parent, chave, rotulo, padrao):
+        linha = ctk.CTkFrame(parent, fg_color="transparent")
+        linha.pack(fill="x", padx=10, pady=2)
+        ctk.CTkLabel(linha, text=rotulo, width=90, anchor="w").pack(side="left")
+        e = ctk.CTkEntry(linha)
+        e.insert(0, padrao)
+        e.pack(side="left", fill="x", expand=True)
+        self.entries[chave] = e
+
     def _build_sidebar(self, parent):
-        side = ctk.CTkFrame(parent, width=210, corner_radius=0)
-        side.grid(row=0, column=0, rowspan=2, sticky="nsw")
-        side.grid_propagate(False)
+        side = ctk.CTkScrollableFrame(parent, width=250, corner_radius=0)
+        side.grid(row=0, column=0, rowspan=2, sticky="ns")
 
-        ctk.CTkLabel(side, text="Visão Computacional", font=ctk.CTkFont(size=18, weight="bold")).pack(pady=(20, 15), padx=15)
+        self._secao(side, "ARQUIVO")
+        self._botao(side, "Abrir imagem", self.load_image)
+        self._botao(side, "Salvar imagem", self.save_image)
 
-        ctk.CTkLabel(side, text="ARQUIVO", anchor="w", text_color="gray").pack(fill="x", padx=15)
-        ctk.CTkButton(side, text="Abrir imagem", command=self.load_image).pack(fill="x", padx=15, pady=5)
-        ctk.CTkButton(side, text="Salvar imagem", command=self.save_image).pack(fill="x", padx=15, pady=5)
+        self._secao(side, "BÁSICO")
+        self._botao(side, "Zerar intensidade", self.zero_image)
+        self._botao(side, "Restaurar original", self.restore_image, fg_color="gray30", hover_color="gray40")
+        self._botao(side, "Escala de cinza", self.op_cinza)
 
-        ctk.CTkLabel(side, text="OPERAÇÕES", anchor="w", text_color="gray").pack(fill="x", padx=15, pady=(20, 0))
-        ctk.CTkButton(side, text="Zerar intensidade", command=self.zero_image).pack(fill="x", padx=15, pady=5)
-        ctk.CTkButton(side, text="Restaurar original", fg_color="gray30", hover_color="gray40",
-                      command=self.restore_image).pack(fill="x", padx=15, pady=5)
+        self._secao(side, "FILTROS")
+        self.filtro_menu = ctk.CTkOptionMenu(side, values=FILTROS)
+        self.filtro_menu.pack(fill="x", padx=10, pady=3)
+        self._campo(side, "k", "Janela k", "3")
+        self._campo(side, "alpha", "α (cortada)", "2")
+        self._botao(side, "Aplicar filtro", self.op_filtro)
 
-        ctk.CTkLabel(side, text="TEMA", anchor="w", text_color="gray").pack(fill="x", padx=15, pady=(20, 0))
+        self._secao(side, "TRANSFORMAÇÃO GEOMÉTRICA")
+        self._campo(side, "s", "Escala", "1.0")
+        self._campo(side, "theta", "Ângulo (°)", "0")
+        self._campo(side, "tx", "Transl. x", "0")
+        self._campo(side, "ty", "Transl. y", "0")
+        self.interp_menu = ctk.CTkOptionMenu(side, values=["bilinear", "vizinho"])
+        self.interp_menu.pack(fill="x", padx=10, pady=3)
+        self._botao(side, "Aplicar transformação", self.op_transformar)
+
+        self._secao(side, "REAMOSTRAGEM")
+        self._campo(side, "r", "Fator r", "2")
+        self._botao(side, "Aumentar resolução", lambda: self.op_reamostrar(True))
+        self._botao(side, "Diminuir resolução", lambda: self.op_reamostrar(False))
+
+        self._secao(side, "DISTORÇÃO RADIAL")
+        self._campo(side, "k1", "k1", "0.1")
+        self._campo(side, "k2", "k2", "0.0")
+        self._botao(side, "Corrigir distorção", self.op_distorcao)
+
+        self._secao(side, "COMPOSIÇÃO (OVER)")
+        self._campo(side, "over_a", "α", "0.5")
+        self._botao(side, "Compor com imagem de frente...", self.op_over)
+
+        self._secao(side, "IMAGEM INTEGRAL")
+        self._campo(side, "ret", "i0,j0,i1,j1", "0,0,10,10")
+        self._botao(side, "Soma no retângulo", self.op_soma_retangulo)
+
+        self._secao(side, "SEGMENTAÇÃO / MRF")
+        self._campo(side, "kc", "Clusters k", "3")
+        self._botao(side, "Segmentar (k-means)", self.op_kmeans)
+        self._campo(side, "icm_s", "Suavidade s", "0.3")
+        self._botao(side, "Binarizar + limpar (ICM)", self.op_icm)
+
+        self._secao(side, "TEMA")
         ctk.CTkOptionMenu(side, values=["Dark", "Light", "System"],
-                          command=lambda m: ctk.set_appearance_mode(m)).pack(fill="x", padx=15, pady=5)
+                          command=lambda m: ctk.set_appearance_mode(m)).pack(fill="x", padx=10, pady=(3, 14))
 
-    def _build_exercises(self, parent):
+    def _build_funcoes(self, parent):
         parent.grid_columnconfigure(1, weight=1)
         parent.grid_rowconfigure(0, weight=1)
 
-        lista = ctk.CTkScrollableFrame(parent, width=290)
+        lista = ctk.CTkScrollableFrame(parent, width=260)
         lista.grid(row=0, column=0, sticky="ns", padx=(0, 8), pady=4)
-        slide_atual = None
-        for i, (slide, titulo, _, _) in enumerate(exercicios.EXERCICIOS):
-            if slide != slide_atual:
-                slide_atual = slide
-                ctk.CTkLabel(lista, text=slide.upper(), anchor="w", text_color="gray").pack(fill="x", pady=(10, 2))
-            ctk.CTkButton(lista, text=titulo, anchor="w", command=lambda i=i: self.run_exercise(i)).pack(fill="x", pady=2)
+        cat = None
+        for i, (categoria, nome, _fn, _p) in enumerate(FUNCOES):
+            if categoria != cat:
+                cat = categoria
+                ctk.CTkLabel(lista, text=categoria.upper(), anchor="w", text_color="gray").pack(fill="x", pady=(10, 2))
+            ctk.CTkButton(lista, text=nome, anchor="w", height=26, command=lambda i=i: self.selecionar_funcao(i)
+                          ).pack(fill="x", pady=1)
 
         direita = ctk.CTkFrame(parent, fg_color="transparent")
         direita.grid(row=0, column=1, sticky="nsew")
         direita.grid_columnconfigure(0, weight=1)
-        direita.grid_rowconfigure(1, weight=1)
-        ctk.CTkButton(direita, text="Resolver todos", width=140, command=self.run_all).grid(row=0, column=0, sticky="w", pady=(4, 6))
-        self.output = ctk.CTkTextbox(direita, font=ctk.CTkFont(family="Consolas", size=13), wrap="none")
-        self.output.grid(row=1, column=0, sticky="nsew")
-        self.output.insert("end", "Selecione um exercício na lista ao lado.")
+        direita.grid_rowconfigure(3, weight=1)
+        self.fun_titulo = ctk.CTkLabel(direita, text="Selecione uma função", anchor="w",
+                                       font=ctk.CTkFont(size=16, weight="bold"))
+        self.fun_titulo.grid(row=0, column=0, sticky="ew", pady=(4, 0))
+        self.fun_doc = ctk.CTkLabel(direita, text="", anchor="w", justify="left", wraplength=700, text_color="gray")
+        self.fun_doc.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        self.fun_params = ctk.CTkFrame(direita)
+        self.fun_params.grid(row=2, column=0, sticky="ew")
+        self.fun_params.grid_columnconfigure(1, weight=1)
+        self.fun_saida = ctk.CTkTextbox(direita, font=ctk.CTkFont(family="Consolas", size=13))
+        self.fun_saida.grid(row=3, column=0, sticky="nsew", pady=8)
+        self.fun_atual = None
+        self.fun_campos = []
 
-    def _write(self, text):
-        self.output.configure(state="normal")
-        self.output.delete("1.0", "end")
-        self.output.insert("end", text)
+    # ---------- aba Funções ----------
+    def selecionar_funcao(self, i):
+        _cat, nome, fn, params = FUNCOES[i]
+        self.fun_atual = i
+        self.fun_titulo.configure(text=nome)
+        doc = (fn.__doc__ or "").strip()
+        self.fun_doc.configure(text=doc)
+        for w in self.fun_params.winfo_children():
+            w.destroy()
+        self.fun_campos = []
+        for r, (pnome, padrao) in enumerate(params):
+            ctk.CTkLabel(self.fun_params, text=pnome, anchor="w", width=110).grid(row=r, column=0, padx=8, pady=3)
+            e = ctk.CTkEntry(self.fun_params)
+            e.insert(0, padrao)
+            e.grid(row=r, column=1, sticky="ew", padx=8, pady=3)
+            self.fun_campos.append(e)
+        ctk.CTkButton(self.fun_params, text="Calcular", command=self.calcular_funcao).grid(
+            row=len(params), column=0, columnspan=2, pady=8)
+        self.fun_saida.delete("1.0", "end")
 
-    def run_exercise(self, i):
+    def calcular_funcao(self):
+        if self.fun_atual is None:
+            return
+        _cat, _nome, fn, params = FUNCOES[self.fun_atual]
         try:
-            self._write(exercicios.resolver(i))
+            args = [ast.literal_eval(e.get().strip()) for e in self.fun_campos]
+            res = fn(*args)
+            texto = formatar(res)
         except Exception as exc:
-            self._write(f"Erro ao resolver: {exc}")
+            texto = f"Erro: {exc}"
+        self.fun_saida.delete("1.0", "end")
+        self.fun_saida.insert("end", texto)
 
-    def run_all(self):
-        partes = []
-        for i in range(len(exercicios.EXERCICIOS)):
-            try:
-                partes.append(exercicios.resolver(i))
-            except Exception as exc:
-                partes.append(f"Exercício {i + 1}: erro {exc}\n")
-        self._write(("=" * 60 + "\n").join(partes))
-
-    # ---------- funcionalidades ----------
+    # ---------- arquivo e operações básicas ----------
     def load_image(self):
         path = filedialog.askopenfilename(
             title="Abrir imagem",
@@ -159,6 +248,140 @@ class App(ctk.CTk):
         self.current = self.original.copy()
         self.status.configure(text="Imagem original restaurada.")
         self.show()
+
+    # ---------- operações com a biblioteca ----------
+    def _num(self, chave, tipo=float):
+        return tipo(self.entries[chave].get().replace(",", "."))
+
+    def _array(self):
+        return np.asarray(self.current, dtype=float)
+
+    def _aplicar(self, fn, msg, normalizar=False):
+        """Executa fn(array) -> array e exibe o resultado como imagem."""
+        if not self._has_image():
+            return
+        try:
+            res = np.asarray(fn(self._array()), float)
+        except Exception as exc:
+            messagebox.showerror("Erro", str(exc))
+            return
+        if normalizar:
+            res = np.abs(res)
+            res = res * (255 / res.max()) if res.max() > 0 else res
+        self.current = Image.fromarray(np.clip(np.rint(res), 0, 255).astype(np.uint8))
+        self.status.configure(text=f"{msg}  |  {self.current.width}x{self.current.height}")
+        self.show()
+
+    def op_cinza(self):
+        if not self._has_image():
+            return
+        self.current = self.current.convert("L")
+        self.status.configure(text="Convertida para escala de cinza.")
+        self.show()
+
+    def op_filtro(self):
+        nome = self.filtro_menu.get()
+        try:
+            k, alpha = self._num("k", int), self._num("alpha", int)
+        except ValueError:
+            return messagebox.showerror("Erro", "Parâmetros inválidos.")
+        if k % 2 == 0 and nome != "Corner (separável)":
+            return messagebox.showerror("Erro", "A janela k deve ser ímpar.")
+        # modo "reflect" evita escurecimento nas bordas
+        def f(a):
+            if nome == "Média (box)":
+                return filtros.convolucao(a, filtros.nucleo_media(k), "reflect")
+            if nome == "Média (imagem integral)":
+                return filtros.filtro_media_integral(a, k)
+            if nome == "Gaussiano":
+                return filtros.convolucao(a, filtros.nucleo_gaussiano(k), "reflect")
+            if nome == "Corner (separável)":
+                return filtros.filtro_separavel(a, filtros.H_CORNER, filtros.H_CORNER, "reflect")
+            if nome == "Mediana":
+                return filtros.mediana(a, k, "reflect")
+            if nome == "Média α-cortada":
+                return filtros.media_alfa_cortada(a, k, alpha, "reflect")
+            return filtros.mediana_ponderada(a, filtros.nucleo_binomial(k) * (2 ** (2 * (k - 1))), "reflect")
+        self._aplicar(f, f"Filtro: {nome}", normalizar=(nome == "Corner (separável)"))
+
+    def op_transformar(self):
+        try:
+            s, th, tx, ty = (self._num(c) for c in ("s", "theta", "tx", "ty"))
+        except ValueError:
+            return messagebox.showerror("Erro", "Parâmetros inválidos.")
+        interp = self.interp_menu.get()
+        if not self._has_image():
+            return
+        M = transformacoes.similaridade_centrada(self._array().shape[:2], s, th, (tx, ty))
+        self._aplicar(lambda a: transformacoes.transformar_imagem(a, M, interpolacao=interp),
+                      f"Similaridade s={s:g}, θ={th:g}°, t=({tx:g},{ty:g})")
+
+    def op_reamostrar(self, aumentar):
+        try:
+            r = self._num("r", int)
+            if r < 2:
+                raise ValueError
+        except ValueError:
+            return messagebox.showerror("Erro", "O fator r deve ser um inteiro >= 2.")
+        fn = transformacoes.aumentar_resolucao if aumentar else transformacoes.diminuir_resolucao
+        self._aplicar(lambda a: fn(a, r), f"{'Aumento' if aumentar else 'Redução'} de resolução (r={r})")
+
+    def op_distorcao(self):
+        try:
+            k1, k2 = self._num("k1"), self._num("k2")
+        except ValueError:
+            return messagebox.showerror("Erro", "Parâmetros inválidos.")
+        self._aplicar(lambda a: transformacoes.corrigir_distorcao_radial(a, k1, k2),
+                      f"Distorção radial k1={k1:g}, k2={k2:g}")
+
+    def op_over(self):
+        if not self._has_image():
+            return
+        try:
+            alpha = self._num("over_a")
+        except ValueError:
+            return messagebox.showerror("Erro", "α inválido.")
+        path = filedialog.askopenfilename(title="Imagem de frente",
+                                          filetypes=[("Imagens", "*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.gif")])
+        if not path:
+            return
+        try:
+            frente = Image.open(path).convert(self.current.mode).resize(self.current.size)
+        except Exception as exc:
+            return messagebox.showerror("Erro", f"Não foi possível abrir a imagem:\n{exc}")
+        F = np.asarray(frente, float)
+        self._aplicar(lambda a: transformacoes.composicao_over(F, a, alpha), f"Over (α={alpha:g})")
+
+    def op_soma_retangulo(self):
+        if not self._has_image():
+            return
+        try:
+            i0, j0, i1, j1 = (int(v) for v in self.entries["ret"].get().split(","))
+            g = np.asarray(self.current.convert("L"), float)
+            if not (0 <= i0 <= i1 < g.shape[0] and 0 <= j0 <= j1 < g.shape[1]):
+                raise ValueError("Retângulo fora da imagem.")
+            soma = filtros.soma_retangulo(filtros.imagem_integral(g), i0, j0, i1, j1)
+        except Exception as exc:
+            return messagebox.showerror("Erro", f"Use 'i0,j0,i1,j1' (linha, coluna) dentro da imagem.\n{exc}")
+        self.status.configure(text=f"Soma dos pixels (cinza) em [{i0},{j0}]-[{i1},{j1}] = {soma:g}")
+
+    def op_kmeans(self):
+        try:
+            k = self._num("kc", int)
+        except ValueError:
+            return messagebox.showerror("Erro", "k inválido.")
+        self._aplicar(lambda a: aprendizado.segmentar_imagem_kmeans(a, k), f"K-means (k={k})")
+
+    def op_icm(self):
+        try:
+            s = self._num("icm_s")
+        except ValueError:
+            return messagebox.showerror("Erro", "s inválido.")
+
+        def f(a):
+            g = a if a.ndim == 2 else a.mean(axis=2)
+            return otimizacao.restaurar_icm(g > g.mean(), s=s) * 255
+        self._aplicar(f, f"Binarização + ICM (s={s:g})")
 
     # ---------- utilitários ----------
     def _has_image(self):
